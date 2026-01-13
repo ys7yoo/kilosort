@@ -56,11 +56,11 @@ def plot_drift_scatter(st0, results_dir):
 
     bin_idx = np.digitize(z, np.logspace(1, 2, 90))
     cm = matplotlib.colormaps['binary']
-    for i in np.unique(bin_idx):
-        # Take mean of all amplitude values within one bin, map to color
-        subset = (bin_idx == i)
-        a = z[subset].mean()
-        colors[subset] = cm(((a-10)/90))
+    # Optimized: vectorized color mapping using bincount
+    unique_bins, inverse_idx = np.unique(bin_idx, return_inverse=True)
+    bin_means = np.bincount(inverse_idx, weights=z) / np.bincount(inverse_idx)
+    bin_colors = cm((bin_means - 10) / 90)
+    colors = bin_colors[inverse_idx]
     
     # Scatter of spike depth over time, with color intensity proportional
     # to log of amplitude.
@@ -83,9 +83,11 @@ def plot_diagnostics(Wall0, clu0, ops, results_dir):
 
     # Top left
     t = np.arange(wPCA.shape[1])/(settings['fs']/1000)
-    for i in range(wPCA.shape[0]):
+    # Optimized: convert to numpy once before loop
+    wPCA_np = wPCA.cpu().numpy()
+    for i in range(wPCA_np.shape[0]):
         color = COLOR_CODES[i % len(COLOR_CODES)]
-        axes[0][0].plot(t, wPCA[i,:].cpu().numpy(), c=color)
+        axes[0][0].plot(t, wPCA_np[i,:], c=color)
     axes[0][0].set_xlabel('Time (s)')
     axes[0][0].set_title('Temporal Features')
 
@@ -98,9 +100,8 @@ def plot_diagnostics(Wall0, clu0, ops, results_dir):
 
     # Comput spike counts and mean amplitudes
     n_units = int(clu0.max()) + 1
-    spike_counts = np.zeros(n_units)
-    for i in range(n_units):
-        spike_counts[i] = (clu0[clu0 == i]).size
+    # Optimized: use np.bincount instead of slow loop
+    spike_counts = np.bincount(clu0, minlength=n_units)
     mean_amp = torch.linalg.norm(Wall0, dim=(1,2)).cpu().numpy()
 
     # Bottom left
@@ -132,13 +133,8 @@ def plot_spike_positions(clu, is_refractory, results_dir):
     bad_idx = np.in1d(clu, bad_units)
     clu = np.mod(clu, 9)
     clu[bad_idx] = 9
-    colors = np.empty((clu.shape[0], 4), dtype=float)
-
-    # Map modded cluster ids to colors
-    for i in range(10):
-        subset = (clu == i)
-        rgba = PROBE_PLOT_COLORS[i]
-        colors[subset] = rgba
+    # Optimized: direct indexing instead of loop
+    colors = PROBE_PLOT_COLORS[clu]
 
     # Get x, y positions, add to scatterplot
     positions = np.load(results_dir / 'spike_positions.npy')
